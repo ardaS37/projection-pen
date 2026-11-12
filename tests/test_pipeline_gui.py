@@ -105,6 +105,7 @@ def test_pdf_background_render(app, tmp_path):
     window.set_content(str(path))
     assert not window.document.content.isNull()
     assert window.document.content_page == 0
+    assert window.document.content.width() < window.document.content.height()  # portrait PDF must retain aspect ratio
     window.close()
 
 

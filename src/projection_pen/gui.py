@@ -810,7 +810,8 @@ class MainWindow(QMainWindow):
                 if error != QPdfDocument.Error.None_ or not 0 <= page < pdf.pageCount():
                     raise ValueError('PDF açılamadı veya sayfa geçersiz (şifreli PDF desteklenmez).')
                 from PySide6.QtCore import QSize
-                image = pdf.render(page, QSize(self.document.width, self.document.height))
+                render_size = pdf.pagePointSize(page).toSize().scaled(QSize(self.document.width, self.document.height), Qt.AspectRatioMode.KeepAspectRatio)
+                image = pdf.render(page, render_size)
                 if image.isNull():
                     raise ValueError('PDF sayfası oluşturulamadı.')
                 self.pdf_page.setMaximum(pdf.pageCount())
