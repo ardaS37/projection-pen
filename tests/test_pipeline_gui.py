@@ -130,3 +130,35 @@ def test_gui_does_not_bridge_if_latest_slot_skipped_loss_and_reacquisition(app, 
     assert len(window.document.strokes) == 2
     assert window.document.ink.pixelColor(150, 150).alpha() == 0
     window.close()
+
+
+def test_camera_dropdown_lists_real_names_and_keeps_device_selection(app, tmp_path):
+    from projection_pen.camera_devices import CameraDevice, CameraEndpoint
+    window = MainWindow()
+    window.config_dir = tmp_path
+    cameras = [CameraDevice('Integrated Webcam', 'builtin', (CameraEndpoint(0, cv2.CAP_MSMF),)),
+               CameraDevice('Logitech USB Webcam', 'usb-1', (CameraEndpoint(2, cv2.CAP_MSMF), CameraEndpoint(4, cv2.CAP_DSHOW)))]
+    window.populate_cameras(cameras)
+    assert window.camera_choice.count() == 2
+    assert 'Logitech' in window.camera_choice.itemText(1)
+    window.camera_choice.setCurrentIndex(1)
+    window.populate_cameras(list(reversed(cameras)))
+    assert window.camera_choice.currentData().identifier == 'usb-1'
+    window.populate_cameras([])
+    assert window.camera_choice.count() == 0  # no fictional Camera 0
+    assert 'bulunamadı' in window.camera_list_info.text()
+    window.close()
+
+
+def test_start_camera_passes_selected_device_and_backend(app, tmp_path, monkeypatch):
+    from projection_pen.camera_devices import CameraDevice, CameraEndpoint
+    window = MainWindow()
+    window.config_dir = tmp_path
+    device = CameraDevice('USB Webcam', 'usb-device', (CameraEndpoint(7, cv2.CAP_DSHOW),))
+    window.populate_cameras([device])
+    monkeypatch.setattr(CameraPipeline, 'start', lambda self: None)
+    window.start_camera()
+    assert window.pipeline.source == device
+    assert window.source_id == 'usb-device'
+    assert window.pipeline.backend == cv2.CAP_ANY
+    window.close()

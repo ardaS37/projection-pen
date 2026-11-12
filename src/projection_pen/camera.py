@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Event, Lock, Thread
 import copy
-import platform
 import time
 import cv2
 import numpy as np
 from .tracking import ColorTracker, Detection, TrackingConfig
+from .camera_devices import CameraDevice, available_cameras
+from .camera_open import open_camera
 
 
 class LatestSlot:
@@ -48,23 +48,11 @@ class TrackingResult:
     config_revision: int = 0
 
 
-def available_cameras() -> list[tuple[str, int]]:
-    """Linux enumeration avoids opening devices. Other OS probe uses bounded index range."""
-    if platform.system() == 'Linux':
-        return [(str(p), int(p.name[5:])) for p in sorted(Path('/dev').glob('video[0-9]*'))]
-    found = []
-    for index in range(6):
-        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW if platform.system() == 'Windows' else cv2.CAP_ANY)
-        if cap.isOpened():
-            found.append((f'Kamera {index}', index))
-        cap.release()
-    return found
-
-
 class CameraPipeline:
-    def __init__(self, source: int | str, width: int = 1280, height: int = 720,
-                 fps: int = 30, generation: int = 0, simulate: bool = False) -> None:
+    def __init__(self, source: int | str | CameraDevice, width: int = 1280, height: int = 720,
+                 fps: int = 30, generation: int = 0, simulate: bool = False, backend: int = cv2.CAP_ANY) -> None:
         self.source, self.width, self.height, self.fps = source, width, height, fps
+        self.backend = backend
         self.generation, self.simulate = generation, simulate
         self.frames, self.results = LatestSlot(), LatestSlot()
         self.errors, self.info = LatestSlot(), LatestSlot()
@@ -95,17 +83,19 @@ class CameraPipeline:
         cap = None
         try:
             if not self.simulate:
-                backend = cv2.CAP_DSHOW if platform.system() == 'Windows' and isinstance(self.source, int) else cv2.CAP_ANY
-                cap = cv2.VideoCapture(self.source, backend)
-                if not cap.isOpened():
-                    raise RuntimeError('Kamera/video açılamadı. Bağlantı, izin ve başka uygulamaların kullanımını kontrol edin.')
-                if isinstance(self.source, int):
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                    cap.set(cv2.CAP_PROP_FPS, self.fps)
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                pending = None
+                opened_as = 'Video'
+                if isinstance(self.source, (int, CameraDevice)):
+                    cap, pending, endpoint, mode = open_camera(self.source, self.backend, self.width, self.height,
+                                                              self.fps, self.stop_event, self.info.put)
+                    opened_as = f'{endpoint.label} · {mode}'
+                else:
+                    cap = cv2.VideoCapture(self.source, cv2.CAP_ANY)
+                    if not cap.isOpened():
+                        raise RuntimeError('Video dosyası açılamadı. Dosya yolunu ve biçimini kontrol edin.')
                 actual_fps = cap.get(cv2.CAP_PROP_FPS)
-                self.info.put(f'{int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))} × {int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}, cihaz FPS: {actual_fps:.1f}')
+                self.info.put(f'{opened_as} · {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))} × '
+                              f'{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}, cihaz FPS: {actual_fps:.1f}')
             else:
                 actual_fps = self.fps
                 self.info.put(f'Simülasyon: {self.width} × {self.height}, {self.fps} FPS')
@@ -122,7 +112,10 @@ class CameraPipeline:
                         for prop, value in controls:
                             if not cap.set(prop, value):
                                 self.info.put('Kamera bu pozlama/beyaz dengesi ayarını desteklemiyor.')
-                    ok, image = cap.read()
+                    if pending is not None:
+                        ok, image, pending = True, pending, None
+                    else:
+                        ok, image = cap.read()
                     if not ok:
                         raise RuntimeError('Video sona erdi veya kamera bağlantısı kesildi. Çizim durduruldu.')
                 self.frames.put(Frame(image, time.monotonic(), sequence, self.generation))

@@ -11,7 +11,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Projection Pen — yerel interaktif projeksiyon')
     parser.add_argument('--demo', action='store_true', help='Sentetik yeşil işaretleyiciyle başlat')
     parser.add_argument('--smoke-test', action='store_true', help='Simülasyonu aç, 2 saniye sonra çık')
+    parser.add_argument('--list-cameras', action='store_true', help='Sistemde listelenen kameraları ve yöntemlerini göster')
     args = parser.parse_args()
+    if args.list_cameras:
+        import json
+        from dataclasses import asdict
+        from .camera_devices import available_cameras
+        try:
+            print(json.dumps([asdict(device) for device in available_cameras()], ensure_ascii=False, indent=2))
+        except Exception as exc:
+            parser.exit(1, f'Kamera listesi alınamadı: {exc}\n')
+        return
     app = QApplication(sys.argv[:1])
     app.setApplicationName('ProjectionPen')
     app.setOrganizationName('ProjectionPen')

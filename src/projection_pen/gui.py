@@ -14,8 +14,10 @@ from PySide6.QtWidgets import (
     QFormLayout, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
     QScrollArea, QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
+from . import __version__
 from .calibration import Calibration, detect_markers, targets
 from .camera import CameraPipeline, TrackingResult, available_cameras
+from .camera_devices import CameraDevice, BACKEND_NAMES, native_backends
 from .controls import ContactEstimator, ContactMetrics
 from .drawing import DrawingDocument
 from .filters import OneEuroFilter
@@ -75,7 +77,7 @@ class Preview(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, demo: bool = False) -> None:
         super().__init__()
-        self.setWindowTitle('Projection Pen — Kamera Tabanlı Akıllı Tahta')
+        self.setWindowTitle(f'Projection Pen {__version__} — Kamera Tabanlı Akıllı Tahta')
         self.resize(1220, 820)
         self.config_dir = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation))
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +89,8 @@ class MainWindow(QMainWindow):
         self.last_track_id: int | None = None
         self.generation = 0
         self.source_id = ''
+        self.preferred_camera_id = ''
+        self.scan_thread = None
         self.calibration: Calibration | None = None
         self.last_result: TrackingResult | None = None
         self.last_frame = None
@@ -123,6 +127,7 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(16)
+        QTimer.singleShot(0, self.refresh_cameras)
         if demo:
             QTimer.singleShot(100, lambda: self.start_camera(simulate=True))
 
@@ -170,7 +175,16 @@ class MainWindow(QMainWindow):
         self.camera_choice.setEditable(True)
         self.camera_choice.addItem('0', 0)
         camera.addRow('USB kamera', self.camera_choice)
-        self.button(camera, 'Kameraları bul', self.refresh_cameras)
+        self.scan_button = self.button(camera, 'Bağlı kameraları yenile', self.refresh_cameras)
+        self.camera_list_info = QLabel('Bağlı kameralar otomatik listelenir.')
+        self.camera_list_info.setWordWrap(True)
+        camera.addRow(self.camera_list_info)
+        self.camera_backend = QComboBox()
+        self.camera_backend.addItem('Otomatik (önerilen)', cv2.CAP_ANY)
+        for backend in native_backends():
+            if backend != cv2.CAP_ANY:
+                self.camera_backend.addItem(BACKEND_NAMES.get(backend, str(backend)), backend)
+        camera.addRow('Kamera yöntemi', self.camera_backend)
         self.resolution = QComboBox()
         self.resolution.addItems(['640x480', '1280x720', '1920x1080'])
         self.resolution.setCurrentIndex(1)
@@ -358,17 +372,43 @@ class MainWindow(QMainWindow):
             self.pipeline.configure(self.tracking_config(), self.calibration.surface_points if self.calibration else None)
 
     def refresh_cameras(self) -> None:
-        # Enumeration may open devices on Windows, so run it outside the GUI loop.
+        if self.scan_thread is not None and self.scan_thread.is_alive():
+            return
         from threading import Thread
         from .camera import LatestSlot
-        self.camera_scan = LatestSlot()
+        slot = LatestSlot()
+        self.camera_scan = slot
+        self.scan_button.setEnabled(False)
+        self.camera_list_info.setText('Sistemdeki kamera aygıtları listeleniyor…')
         def scan():
             try:
-                self.camera_scan.put(available_cameras())
+                slot.put(available_cameras())
             except Exception as exc:
-                self.camera_scan.put(str(exc))
-        Thread(target=scan, daemon=True).start()
-        self.notify('Kameralar aranıyor…')
+                slot.put(str(exc))
+        self.scan_thread = Thread(target=scan, daemon=True, name='camera-discovery')
+        self.scan_thread.start()
+
+    def populate_cameras(self, cameras: list[CameraDevice]) -> None:
+        selected = self.camera_choice.currentData()
+        identity = selected.identifier if isinstance(selected, CameraDevice) else self.preferred_camera_id
+        manual_text = self.camera_choice.currentText().strip()
+        self.camera_choice.clear()
+        selected_index = -1
+        for index, device in enumerate(cameras):
+            self.camera_choice.addItem(device.label, device)
+            self.camera_choice.setItemData(index, f'{device.label}\n{device.identifier}', Qt.ItemDataRole.ToolTipRole)
+            if device.identifier == identity:
+                selected_index = index
+        if selected_index < 0 and manual_text.isdecimal():
+            selected_index = next((i for i, d in enumerate(cameras)
+                                   if any(e.index == int(manual_text) for e in d.endpoints)), -1)
+        if cameras:
+            self.camera_choice.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+            self.camera_list_info.setText(f'{len(cameras)} kamera bulundu. Adıyla seçip Kamerayı başlat düğmesine basın.')
+        else:
+            self.camera_choice.setCurrentIndex(-1)
+            self.camera_choice.lineEdit().setPlaceholderText('Kamera yok — isterseniz indeks girin')
+            self.camera_list_info.setText('Bağlı kamera bulunamadı. USB bağlantısı, Windows kamera izinleri ve Aygıt Yöneticisi’ni kontrol edip listeyi yenileyin.')
 
     def open_video(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, 'Takip videosu', '', 'Video (*.mp4 *.avi *.mkv *.mov);;Tümü (*)')
@@ -376,12 +416,18 @@ class MainWindow(QMainWindow):
             self.start_camera(source=path)
 
     def start_camera(self, source=None, simulate: bool = False) -> None:
-        if source is None:
+        if simulate:
+            source = 0
+        elif source is None:
             value = self.camera_choice.currentData()
             text = self.camera_choice.currentText().strip()
-            source = int(text) if text.isdecimal() else value
-            if not isinstance(source, int):
-                self.error('USB kamera indeksi girin (örneğin 0).')
+            if text.isdecimal():
+                source = int(text)
+            elif isinstance(value, CameraDevice) and text == value.label:
+                source = value
+                self.preferred_camera_id = value.identifier
+            else:
+                self.error('Listeden bağlı kamerayı seçin veya kamera indeksi girin (örneğin 0).')
                 return
         self.stop_camera()
         self.retired_pipelines = [p for p in self.retired_pipelines if any(t.is_alive() for t in p.threads)]
@@ -391,9 +437,13 @@ class MainWindow(QMainWindow):
         self.last_track_id = None
         self.invalidate_calibration('Yeni kamera oturumu; kalibrasyon yapın veya profil yükleyin.')
         self.generation += 1
-        self.source_id = 'simulation' if simulate else str(source)
+        self.source_id = 'simulation' if simulate else (source.identifier if isinstance(source, CameraDevice) else str(source))
         width, height = map(int, self.resolution.currentText().split('x'))
-        self.pipeline = CameraPipeline(source, width, height, self.fps.value(), self.generation, simulate)
+        self.pipeline = CameraPipeline(source, width, height, self.fps.value(), self.generation, simulate, backend=self.camera_backend.currentData())
+        self.preview.image = QImage()
+        self.preview.cursor = None
+        self.preview.update()
+        self.stats.setText('Kamera açılıyor…')
         self.last_result, self.last_frame, self.camera_size = None, None, None
         self.last_sequence = -1
         self.tracking_changed()
@@ -674,15 +724,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'camera_scan'):
             cameras = self.camera_scan.take()
             if cameras is not None:
+                self.scan_button.setEnabled(True)
                 if isinstance(cameras, str):
+                    self.camera_list_info.setText(cameras)
                     self.notify(cameras)
                 else:
-                    self.camera_choice.clear()
-                    for name, index in cameras:
-                        self.camera_choice.addItem(f'{index} — {name}', index)
-                    if not cameras:
-                        self.camera_choice.addItem('0', 0)
-                    self.notify(f'{len(cameras)} kamera aygıtı bulundu. Bazı Linux düğümleri görüntü sağlamayabilir.')
+                    self.populate_cameras(cameras)
         if not self.pipeline:
             return
         error = self.pipeline.errors.take()
@@ -891,6 +938,8 @@ class MainWindow(QMainWindow):
                 write_json(Path(path), {'version': 1, 'platform': QGuiApplication.platformName(),
                                        'contact': self.contact_metrics.report(), 'validation': self.validation_report,
                                        'frames': list(self.diagnostics),
+                                       'camera_device': self.source_id, 'camera_status': self.device_info.text(),
+                                       'camera_backend': self.camera_backend.currentText(),
                                        'note': 'software_age_ms excludes camera exposure, driver buffering and projector latency'})
                 self.notify('Tanılama raporu kaydedildi.')
             except (OSError, ValueError) as exc:
@@ -912,6 +961,9 @@ class MainWindow(QMainWindow):
                     widget.setValue(data[name])
             self.resolution.setCurrentText(data.get('resolution', '1280x720'))
             self.camera_choice.setEditText(str(data.get('camera', '0')))
+            self.preferred_camera_id = str(data.get('camera_id', ''))
+            backend_index = self.camera_backend.findData(data.get('camera_backend', cv2.CAP_ANY))
+            self.camera_backend.setCurrentIndex(max(0, backend_index))
             color = data.get('color', '#ff3030')
             if QColor(color).isValid():
                 self.document.color = color
@@ -934,7 +986,11 @@ class MainWindow(QMainWindow):
         self.global_toggle.close()
         self.projection.close()
         data = {name: widget.value() for name, widget in self.persisted_widgets().items()}
-        data.update(version=1, resolution=self.resolution.currentText(), camera=self.camera_choice.currentText().split(' — ')[0],
+        selected = self.camera_choice.currentData()
+        data.update(version=1, resolution=self.resolution.currentText(),
+                    camera=str(selected.endpoints[0].index) if isinstance(selected, CameraDevice) else self.camera_choice.currentText(),
+                    camera_id=selected.identifier if isinstance(selected, CameraDevice) else '',
+                    camera_backend=self.camera_backend.currentData(),
                     color=self.document.color, background=self.document.background,
                     background_color=self.document.background_color, smoothing=self.smoothing.isChecked(), mode=self.mode.currentIndex())
         try:

@@ -31,11 +31,19 @@ PowerShell etkinleştirme politikası değişikliği gerekmez. Windows Ayarlar �
 
 Normal kullanım internet, hesap veya API anahtarı gerektirmez. İlk bağımlılık kurulumu paket indirmek için internet ister. OpenCV'nin Qt içeren başka bir dağıtımını aynı sanal ortama kurmayın; bu proje `opencv-contrib-python-headless` kullanır, GUI PySide6 tarafından sağlanır.
 
+## Windows kamera düzeltmesi (0.1.1)
+
+ZIP'i açın, **KUR_WINDOWS.bat** dosyasını bir kez çalıştırın; ardından **BASLAT_WINDOWS.bat** ile açın. Eski sürümün kurulu olması yeni bağımlılığı kurmaz; KUR dosyasını yeniden çalıştırın. Pencere başlığında **0.1.1** görünmeli.
+
+Bağlı kameralar program açılışında adlarıyla listelenir. **Bağlı kameraları yenile** ile USB takıp çıkardıktan sonra listeyi güncelleyin. Yalnız ilk altı indeksin açılmasını deneme yöntemi kaldırıldı. **Kamera yöntemi → Otomatik**, aynı kameranın Media Foundation/DirectShow uçlarını ve istenen biçim çalışmazsa cihaz varsayılanlarını dener. İsterseniz yöntemi elle seçin. Başlatma, yalnız `isOpened()` yerine ilk görüntü karesini de doğrular.
+
+[Kamera görünmüyor / görüntü gelmiyor rehberi](docs/WINDOWS_KAMERA.md)
+
 ## Hızlı başlangıç
 
 1. İşletim sisteminde projeksiyonu **genişletilmiş ekran** yapın. Kamerayı tüm yüzeyi görecek şekilde sabitleyin.
 2. Yeşil işaretleyiciyi kalem ucuna mümkün olduğunca yakın yerleştirin. Başlangıç mürekkebi kırmızıdır; fiziksel renk ve dijital renk bağımsızdır.
-3. Kamera sekmesinde kamerayı seçin/indeks girin; çözünürlük ve FPS seçip başlatın. İstenen ve cihazın bildirdiği gerçek değer farklı olabilir.
+3. Kamera sekmesinde otomatik listelenen kamerayı adıyla seçin (USB/dahili/sanal); çözünürlük ve FPS seçip başlatın. İstenen ve cihazın bildirdiği gerçek değer farklı olabilir.
 4. HSV maskesini açın. Gerekirse renk örnekleme kutusunu işaretleyip önizlemede işaretleyicinin ortasına tıklayın. H, S, V sınırlarını ayarlayın. H alt > H üst kırmızı gibi 179/0 sınırını aşan aralıktır.
 5. Projeksiyon sekmesinden doğru ekranı seçin; [kalibrasyon rehberini](docs/KALIBRASYON.md) uygulayın.
 6. Projeksiyonu tam ekran açın. Çizim sekmesinde **Manuel** modu seçip çizimi etkinleştirin veya **Sürekli** modla test edin.
