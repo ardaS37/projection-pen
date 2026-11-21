@@ -120,8 +120,17 @@ FPS, işleme süresi ve **yazılım yaşı** panelde görünür. Yazılım yaş�
 
 [Kalibrasyon](docs/KALIBRASYON.md) · [Donanım kabul testi](docs/DONANIM_TESTI.md) · [Sınırlamalar ve gelecek çalışmalar](docs/SINIRLAMALAR.md)
 
+<!-- project-screenshot-gallery:start -->
 ## Arayüz önizlemesi
 
-Aşağıdaki görüntü sentetik kaynakla çalışan gerçek Qt arayüzünden alınmıştır; fiziksel donanım testi değildir.
+Aşağıdaki görüntüler sentetik kaynakla çalışan Qt arayüzünün simülasyon modundan alınmıştır.
 
-![Kontrol paneli](docs/assets/control-panel.png)
+<p>
+  <a href="docs/assets/control-panel.png"><img src="docs/assets/control-panel.png" alt="Kontrol paneli" width="440"></a>
+  <a href="docs/screenshots/readme/02-simulasyon.png"><img src="docs/screenshots/readme/02-simulasyon.png" alt="Simülasyon ekranı" width="440"></a>
+</p>
+
+<p>
+  <a href="docs/screenshots/readme/03-ayarlar.png"><img src="docs/screenshots/readme/03-ayarlar.png" alt="Uygulama ayarları" width="440"></a>
+</p>
+<!-- project-screenshot-gallery:end -->
